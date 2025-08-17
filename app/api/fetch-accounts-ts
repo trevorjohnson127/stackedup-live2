@@ -1,0 +1,44 @@
+// app/api/fetch-accounts/route.ts
+import { NextResponse } from 'next/server';
+import { createClient } from '@/utils/supabase/server';
+import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid';
+
+const plaidClient = new PlaidApi(
+  new Configuration({
+    basePath: PlaidEnvironments[process.env.PLAID_ENV as keyof typeof PlaidEnvironments],
+    baseOptions: {
+      headers: {
+        'PLAID-CLIENT-ID': process.env.PLAID_CLIENT_ID!,
+        'PLAID-SECRET': process.env.PLAID_SECRET!,
+      },
+    },
+  })
+);
+
+export async function POST(req: Request) {
+  const { accessToken, userId } = await req.json();
+  const supabase = createClient();
+
+  try {
+    const { data } = await plaidClient.accountsGet({ access_token: accessToken });
+
+    const formatted = data.accounts.map((acct) => ({
+      user_id: userId,
+      account_id: acct.account_id,
+      name: acct.name,
+      type: acct.type,
+      subtype: acct.subtype,
+      mask: acct.mask,
+      institution_name: acct.official_name || '', // rename to match your table
+    }));
+
+    const { error } = await supabase.from('user_accounts').insert(formatted);
+
+    if (error) throw error;
+
+    return NextResponse.json({ accounts: formatted }, { status: 200 });
+
+  } catch (err) {
+    return NextResponse.json({ error: 'Failed to fetch/store accounts', details: err }, { status: 500 });
+  }
+}
